@@ -76,7 +76,7 @@ def play_minimax_game(minimax_first=True):
     return board.result(), get_termination(board)
 
 
-def simulate_games(n=1):
+def simulate_games(n=1000):
     """Runs simulations for both random and minimax-based games."""
     random_stats = collections.Counter()
     minimax_first_stats = collections.Counter()
