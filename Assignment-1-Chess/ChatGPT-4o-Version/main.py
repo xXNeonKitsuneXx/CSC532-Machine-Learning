@@ -1,95 +1,102 @@
 import chess
+import chess.engine
 import random
+from collections import Counter
 
+def random_move(board):
+    """Plays a random legal move."""
+    return random.choice(list(board.legal_moves))
 
-def minimax(board, depth, maximizing):
-    if depth == 0 or board.is_game_over():
-        return evaluate_board(board)
-    legal_moves = list(board.legal_moves)
-    if maximizing:
-        best_value = float('-inf')
-        for move in legal_moves:
-            board.push(move)
-            value = minimax(board, depth - 1, False)
-            board.pop()
-            best_value = max(best_value, value)
-        return best_value
-    else:
-        best_value = float('inf')
-        for move in legal_moves:
-            board.push(move)
-            value = minimax(board, depth - 1, True)
-            board.pop()
-            best_value = min(best_value, value)
-        return best_value
-
-
-def get_best_move(board, depth=2):
+def minimax_move(board, depth=2):
+    """Minimax algorithm with a basic evaluation function."""
+    if board.is_game_over():
+        return None
+    
     best_move = None
-    best_value = float('-inf')
+    best_value = float('-inf') if board.turn else float('inf')
+    
     for move in board.legal_moves:
         board.push(move)
-        move_value = minimax(board, depth - 1, False)
+        move_value = minimax(board, depth - 1, float('-inf'), float('inf'), not board.turn)
         board.pop()
-        if move_value > best_value:
-            best_value = move_value
-            best_move = move
+        
+        if board.turn:  # White (maximizing)
+            if move_value > best_value:
+                best_value = move_value
+                best_move = move
+        else:  # Black (minimizing)
+            if move_value < best_value:
+                best_value = move_value
+                best_move = move
+    
     return best_move
 
+def minimax(board, depth, alpha, beta, maximizing):
+    """Minimax with alpha-beta pruning."""
+    if depth == 0 or board.is_game_over():
+        return evaluate_board(board)
+    
+    if maximizing:
+        max_eval = float('-inf')
+        for move in board.legal_moves:
+            board.push(move)
+            eval_value = minimax(board, depth - 1, alpha, beta, False)
+            board.pop()
+            max_eval = max(max_eval, eval_value)
+            alpha = max(alpha, eval_value)
+            if beta <= alpha:
+                break
+        return max_eval
+    else:
+        min_eval = float('inf')
+        for move in board.legal_moves:
+            board.push(move)
+            eval_value = minimax(board, depth - 1, alpha, beta, True)
+            board.pop()
+            min_eval = min(min_eval, eval_value)
+            beta = min(beta, eval_value)
+            if beta <= alpha:
+                break
+        return min_eval
 
 def evaluate_board(board):
-    if board.is_checkmate():
-        return float('-inf') if board.turn else float('inf')
-    return sum(piece_value(piece) for piece in board.piece_map().values())
+    """Simple evaluation function using material count."""
+    piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+                    chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 1000}
+    
+    score = 0
+    for piece_type in piece_values:
+        score += len(board.pieces(piece_type, chess.WHITE)) * piece_values[piece_type]
+        score -= len(board.pieces(piece_type, chess.BLACK)) * piece_values[piece_type]
+    
+    return score
 
-
-def piece_value(piece):
-    values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
-    return values[piece.piece_type] if piece.color == chess.WHITE else -values[piece.piece_type]
-
-
-def play_minimax_vs_random(minimax_first=True):
+def play_game(white_player, black_player):
+    """Plays a single game between the given players."""
     board = chess.Board()
     while not board.is_game_over():
-        if (board.turn == chess.WHITE and minimax_first) or (board.turn == chess.BLACK and not minimax_first):
-            move = get_best_move(board)
-        else:
-            move = random.choice(list(board.legal_moves))
+        move = white_player(board) if board.turn else black_player(board)
         board.push(move)
-    return board.result()
+    return board.result()  # "1-0", "0-1", or "1/2-1/2"
 
-
-def simulate_games(n):
-    random_vs_random_results = {"1-0": 0, "0-1": 0, "1/2-1/2": 0}
-    minimax_first_results = {"1-0": 0, "0-1": 0, "1/2-1/2": 0}
-    minimax_second_results = {"1-0": 0, "0-1": 0, "1/2-1/2": 0}
-    for _ in range(n):
-        board = chess.Board()
-        while not board.is_game_over():
-            move = random.choice(list(board.legal_moves))
-            board.push(move)
-        random_vs_random_results[board.result()] += 1
-        result = play_minimax_vs_random(minimax_first=True)
-        minimax_first_results[result] += 1
-        result = play_minimax_vs_random(minimax_first=False)
-        minimax_second_results[result] += 1
-    return random_vs_random_results, minimax_first_results, minimax_second_results
-
-
-def calculate_win_rate(results, n):
+def simulate_games(n, white_strategy, black_strategy):
+    """Simulates n games and counts results."""
+    results = Counter(play_game(white_strategy, black_strategy) for _ in range(n))
+    
     win_rate = {
-        "Win %": (results["1-0"] / n) * 100,
-        "Loss %": (results["0-1"] / n) * 100,
-        "Draw %": (results["1/2-1/2"] / n) * 100
+        'White Win %': (results['1-0'] / n) * 100,
+        'Black Win %': (results['0-1'] / n) * 100,
+        'Draw %': (results['1/2-1/2'] / n) * 100
     }
     return win_rate
 
+# Simulating games
+num_games = 1000
+results_random_vs_random = simulate_games(num_games, random_move, random_move)
+results_expert_vs_random = simulate_games(num_games, minimax_move, random_move)
+results_random_vs_expert = simulate_games(num_games, random_move, minimax_move)
 
-if __name__ == "__main__":
-    n = 1000
-    random_results, minimax_first_results, minimax_second_results = simulate_games(n)
-    print("Random vs Random Results:", random_results, "Win Rate:", calculate_win_rate(random_results, n))
-    print("Minimax First vs Random Results:", minimax_first_results, "Win Rate:",
-          calculate_win_rate(minimax_first_results, n))
-    print("Minimax Second vs Random Results:", minimax_second_results, "Win Rate:",
-          calculate_win_rate(minimax_second_results, n))
+# Displaying results
+print("Random vs Random:", results_random_vs_random)
+print("Expert (White) vs Random (Black):", results_expert_vs_random)
+print("Random (White) vs Expert (Black):", results_random_vs_expert)
