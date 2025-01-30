@@ -1,166 +1,118 @@
 import chess
-import collections
 import random
+import collections
 
-# Piece Values
-PIECE_VALUES = {
-    chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
-    chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 100
+# Piece values for evaluation
+PIECE_SCORES = {
+    chess.PAWN: 100,
+    chess.KNIGHT: 300,
+    chess.BISHOP: 320,
+    chess.ROOK: 500,
+    chess.QUEEN: 900,
+    chess.KING: 20000
 }
 
-TERMINATIONS = ['is_stalemate', 'is_insufficient_material', 'is_checkmate',
-                'can_claim_fifty_moves', 'can_claim_threefold_repetition']
+# Conditions for game termination
+DRAW_CONDITIONS = ['is_stalemate', 'is_insufficient_material', 'can_claim_fifty_moves', 'can_claim_threefold_repetition']
 
-
-def get_termination(board):
-    """Check how the game ended."""
-    for termination in TERMINATIONS:
-        method = getattr(board, termination)
-        if method():
-            return termination
-    return None
-
-
-def evaluate_board(board):
-    """Improved Evaluation: Material, Mobility, King Safety"""
+def evaluate_position(board):
     if board.is_checkmate():
-        return -1000 if board.turn else 1000  # Negative if current player is in checkmate
-    if board.is_stalemate() or board.is_insufficient_material():
-        return 0  # Draw
+        return -1 if board.turn else 1  # Negative if Black wins, positive if White wins
+    if any(getattr(board, condition)() for condition in DRAW_CONDITIONS):
+        return 0  # Draw scenario
     
-    score = 0
-    for piece_type in PIECE_VALUES.keys():
-        score += len(board.pieces(piece_type, chess.WHITE)) * PIECE_VALUES[piece_type]
-        score -= len(board.pieces(piece_type, chess.BLACK)) * PIECE_VALUES[piece_type]
+    score = sum((len(board.pieces(p, chess.WHITE)) - len(board.pieces(p, chess.BLACK))) * PIECE_SCORES[p] for p in PIECE_SCORES)
+    return score / 10000  # Normalize for stability
 
-    # Number of legal moves
-    score += 0.1 * len(list(board.legal_moves)) if board.turn == chess.WHITE else -0.1 * len(list(board.legal_moves))
-
-    # King safety: Encourage castling
-    if board.has_castling_rights(chess.WHITE):
-        score += 0.5
-    if board.has_castling_rights(chess.BLACK):
-        score -= 0.5
-
-    return score
-
-
-def minimax(board, depth, alpha, beta, maximizing_player):
-    """Minimax with Alpha-Beta Pruning (Depth 3)"""
+# Minimax with Alpha-Beta Pruning
+def minimax_search(board, depth, alpha, beta, is_maximizing):
     if depth == 0 or board.is_game_over():
-        return evaluate_board(board)
-
-    if maximizing_player:
-        max_eval = float('-inf')
-        for move in board.legal_moves:
-            board.push(move)
-            eval = minimax(board, depth - 1, alpha, beta, False)
-            board.pop()
-            max_eval = max(max_eval, eval)
-            alpha = max(alpha, eval)
-            if beta <= alpha:
-                break
-        return max_eval
-    else:
-        min_eval = float('inf')
-        for move in board.legal_moves:
-            board.push(move)
-            eval = minimax(board, depth - 1, alpha, beta, True)
-            board.pop()
-            min_eval = min(min_eval, eval)
-            beta = min(beta, eval)
-            if beta <= alpha:
-                break
-        return min_eval
-
-
-def best_move(board, depth=3):
-    """Find the best move using Minimax (Depth 3)"""
-    best_eval = float('-inf') if board.turn else float('inf')
-    best_move = None
-
-    for move in board.legal_moves:
-        board.push(move)
-        eval = minimax(board, depth - 1, float('-inf'), float('inf'), not board.turn)
-        board.pop()
-
-        if (board.turn and eval > best_eval) or (not board.turn and eval < best_eval):
-            best_eval = eval
-            best_move = move
-
-    return best_move
-
-
-def random_move(board):
-    """Play a smarter random move: Prefer captures, avoid repetition"""
-    legal_moves = list(board.legal_moves)
-    random.shuffle(legal_moves)
-
-    # Prefer captures over random moves
-    capture_moves = [move for move in legal_moves if board.is_capture(move)]
-    return random.choice(capture_moves) if capture_moves else random.choice(legal_moves)
-
-
-def play_game(white_strategy, black_strategy):
-    """Simulate a chess game with different strategies."""
-    board = chess.Board()
-
-    while not board.is_game_over():
-        move = white_strategy(board) if board.turn == chess.WHITE else black_strategy(board)
-        board.push(move)
-
-    result = board.result(claim_draw=True)
-    termination = get_termination(board)
+        return evaluate_position(board), None
     
-    return result, termination
+    best_move = None
+    possible_moves = sorted(board.legal_moves, key=lambda m: board.is_capture(m), reverse=True)  # Prioritize captures
 
+    if is_maximizing:
+        max_score = float('-inf')
+        for move in possible_moves:
+            board.push(move)
+            score, _ = minimax_search(board, depth - 1, alpha, beta, False)
+            board.pop()
+            if score > max_score:
+                max_score = score
+                best_move = move
+            alpha = max(alpha, score)
+            if beta <= alpha:
+                break  # Prune search
+        return max_score, best_move
+    else:
+        min_score = float('inf')
+        for move in possible_moves:
+            board.push(move)
+            score, _ = minimax_search(board, depth - 1, alpha, beta, True)
+            board.pop()
+            if score < min_score:
+                min_score = score
+                best_move = move
+            beta = min(beta, score)
+            if beta <= alpha:
+                break  # Prune search
+        return min_score, best_move
 
-def run_simulation(num_games, white_strategy, black_strategy):
-    """Run multiple games and summarize the results."""
-    stats = collections.Counter()
+# Simulation functions
+def random_vs_random():
+    board = chess.Board()
+    while not board.is_game_over():
+        move = random.choice(list(board.legal_moves))
+        board.push(move)
+    return determine_winner(board)
 
-    for _ in range(num_games):
-        result, termination = play_game(white_strategy, black_strategy)
-        if termination == 'is_checkmate':
-            stats[result] += 1
+def expert_vs_random():
+    board = chess.Board()
+    while not board.is_game_over():
+        if board.turn:
+            _, move = minimax_search(board, 2, float('-inf'), float('inf'), True)
         else:
-            stats[termination] += 1
+            move = random.choice(list(board.legal_moves))
+        board.push(move)
+    return determine_winner(board)
 
-    return stats
+def random_vs_expert():
+    board = chess.Board()
+    while not board.is_game_over():
+        if board.turn:
+            move = random.choice(list(board.legal_moves))
+        else:
+            _, move = minimax_search(board, 2, float('-inf'), float('inf'), False)
+        board.push(move)
+    return determine_winner(board)
 
+def determine_winner(board):
+    if board.is_checkmate():
+        return "1-0" if board.turn == False else "0-1"
+    return "1/2-1/2"
 
-def calculate_win_rate(stats):
-    """Compute win rates from simulation results."""
-    white_wins = stats['1-0']
-    black_wins = stats['0-1']
-    draws = sum(stats[term] for term in stats if term not in ['1-0', '0-1'])
+def run_experiments(simulation, iterations=1000):
+    results = collections.Counter()
+    for _ in range(iterations):
+        outcome = simulation()
+        results[outcome] += 1
+    return results
 
-    total_games = white_wins + black_wins + draws
-    white_win_rate = (white_wins / total_games) * 100
-    black_win_rate = (black_wins / total_games) * 100
-    draw_rate = (draws / total_games) * 100
+def main():
+    matchups = {
+        "Random vs Random": random_vs_random,
+        "Expert (White) vs Random (Black)": expert_vs_random,
+        "Random (White) vs Expert (Black)": random_vs_expert
+    }
+    
+    for title, func in matchups.items():
+        stats = run_experiments(func, 1000)
+        print(f"=== {title} ===")
+        print(f"Total Games: 1000")
+        print(f"White Wins: {stats['1-0']} ({stats['1-0'] / 10:.2f}%)")
+        print(f"Black Wins: {stats['0-1']} ({stats['0-1'] / 10:.2f}%)")
+        print(f"Draws: {stats['1/2-1/2']} ({stats['1/2-1/2'] / 10:.2f}%)\n")
 
-    return white_win_rate, black_win_rate, draw_rate
-
-
-# Number of simulations per case
-NUM_GAMES = 1000
-
-# Run simulations
-print("Running Case 1: Random VS Random")
-stats1 = run_simulation(NUM_GAMES, random_move, random_move)
-w1, b1, d1 = calculate_win_rate(stats1)
-
-print("Running Case 2: Expert (Minimax) VS Random")
-stats2 = run_simulation(NUM_GAMES, best_move, random_move)
-w2, b2, d2 = calculate_win_rate(stats2)
-
-print("Running Case 3: Random VS Expert (Minimax)")
-stats3 = run_simulation(NUM_GAMES, random_move, best_move)
-w3, b3, d3 = calculate_win_rate(stats3)
-
-# Display results
-print("\n=== Simulation Results (Win Rates) ===")
-print(f"Case 1 (Random vs. Random): White Win: {w1:.2f}%, Black Win: {b1:.2f}%, Draw: {d1:.2f}%")
-print(f"Case 2 (Minimax vs. Random): White Win: {w2:.2f}%, Black Win: {b2:.2f}%, Draw: {d2:.2f}%")
-print(f"Case 3 (Random vs. Minimax): White Win: {w3:.2f}%, Black Win: {b3:.2f}%, Draw: {d3:.2f}%")
+if __name__ == "__main__":
+    main()
