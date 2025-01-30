@@ -2,7 +2,7 @@ import chess
 import collections
 import random
 
-# Piece Values (Improved)
+# Piece Values
 PIECE_VALUES = {
     chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
     chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 100
@@ -33,7 +33,7 @@ def evaluate_board(board):
         score += len(board.pieces(piece_type, chess.WHITE)) * PIECE_VALUES[piece_type]
         score -= len(board.pieces(piece_type, chess.BLACK)) * PIECE_VALUES[piece_type]
 
-    # Add mobility (number of legal moves)
+    # Number of legal moves
     score += 0.1 * len(list(board.legal_moves)) if board.turn == chess.WHITE else -0.1 * len(list(board.legal_moves))
 
     # King safety: Encourage castling
