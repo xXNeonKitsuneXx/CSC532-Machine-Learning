@@ -2,7 +2,7 @@ import chess
 import collections
 import random
 
-# Piece Values for Evaluation
+# Piece Values (Improved)
 PIECE_VALUES = {
     chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
     chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 100
@@ -22,7 +22,7 @@ def get_termination(board):
 
 
 def evaluate_board(board):
-    """Evaluate board position for minimax."""
+    """Improved Evaluation: Material, Mobility, King Safety"""
     if board.is_checkmate():
         return -1000 if board.turn else 1000  # Negative if current player is in checkmate
     if board.is_stalemate() or board.is_insufficient_material():
@@ -32,12 +32,21 @@ def evaluate_board(board):
     for piece_type in PIECE_VALUES.keys():
         score += len(board.pieces(piece_type, chess.WHITE)) * PIECE_VALUES[piece_type]
         score -= len(board.pieces(piece_type, chess.BLACK)) * PIECE_VALUES[piece_type]
-    
+
+    # Add mobility (number of legal moves)
+    score += 0.1 * len(list(board.legal_moves)) if board.turn == chess.WHITE else -0.1 * len(list(board.legal_moves))
+
+    # King safety: Encourage castling
+    if board.has_castling_rights(chess.WHITE):
+        score += 0.5
+    if board.has_castling_rights(chess.BLACK):
+        score -= 0.5
+
     return score
 
 
 def minimax(board, depth, alpha, beta, maximizing_player):
-    """Minimax with Alpha-Beta Pruning."""
+    """Minimax with Alpha-Beta Pruning (Depth 3)"""
     if depth == 0 or board.is_game_over():
         return evaluate_board(board)
 
@@ -65,8 +74,8 @@ def minimax(board, depth, alpha, beta, maximizing_player):
         return min_eval
 
 
-def best_move(board, depth=2):
-    """Find the best move using Minimax."""
+def best_move(board, depth=3):
+    """Find the best move using Minimax (Depth 3)"""
     best_eval = float('-inf') if board.turn else float('inf')
     best_move = None
 
@@ -83,8 +92,13 @@ def best_move(board, depth=2):
 
 
 def random_move(board):
-    """Play a random legal move."""
-    return random.choice(list(board.legal_moves))
+    """Play a smarter random move: Prefer captures, avoid repetition"""
+    legal_moves = list(board.legal_moves)
+    random.shuffle(legal_moves)
+
+    # Prefer captures over random moves
+    capture_moves = [move for move in legal_moves if board.is_capture(move)]
+    return random.choice(capture_moves) if capture_moves else random.choice(legal_moves)
 
 
 def play_game(white_strategy, black_strategy):
