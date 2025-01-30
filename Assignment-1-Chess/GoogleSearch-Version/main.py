@@ -1,122 +1,152 @@
 import chess
-import random
 import collections
+import random
+
+# Piece Values for Evaluation
+PIECE_VALUES = {
+    chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+    chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 100
+}
+
+TERMINATIONS = ['is_stalemate', 'is_insufficient_material', 'is_checkmate',
+                'can_claim_fifty_moves', 'can_claim_threefold_repetition']
 
 
 def get_termination(board):
     """Check how the game ended."""
+    for termination in TERMINATIONS:
+        method = getattr(board, termination)
+        if method():
+            return termination
+    return None
+
+
+def evaluate_board(board):
+    """Evaluate board position for minimax."""
     if board.is_checkmate():
-        return "checkmate"
-    elif board.is_stalemate():
-        return "stalemate"
-    elif board.is_insufficient_material():
-        return "insufficient_material"
-    elif board.can_claim_fifty_moves():
-        return "fifty_moves"
-    elif board.can_claim_threefold_repetition():
-        return "threefold_repetition"
-    return "in_progress"
+        return -1000 if board.turn else 1000  # Negative if current player is in checkmate
+    if board.is_stalemate() or board.is_insufficient_material():
+        return 0  # Draw
+    
+    score = 0
+    for piece_type in PIECE_VALUES.keys():
+        score += len(board.pieces(piece_type, chess.WHITE)) * PIECE_VALUES[piece_type]
+        score -= len(board.pieces(piece_type, chess.BLACK)) * PIECE_VALUES[piece_type]
+    
+    return score
 
 
-def minimax(board, depth, maximizing):
-    """Simple Minimax implementation without Stockfish."""
+def minimax(board, depth, alpha, beta, maximizing_player):
+    """Minimax with Alpha-Beta Pruning."""
     if depth == 0 or board.is_game_over():
-        if board.is_checkmate():
-            return -100 if board.turn else 100
-        return 0
+        return evaluate_board(board)
 
-    if maximizing:
-        best_value = -float('inf')
+    if maximizing_player:
+        max_eval = float('-inf')
         for move in board.legal_moves:
             board.push(move)
-            best_value = max(best_value, minimax(board, depth - 1, False))
+            eval = minimax(board, depth - 1, alpha, beta, False)
             board.pop()
-        return best_value
+            max_eval = max(max_eval, eval)
+            alpha = max(alpha, eval)
+            if beta <= alpha:
+                break
+        return max_eval
     else:
-        best_value = float('inf')
+        min_eval = float('inf')
         for move in board.legal_moves:
             board.push(move)
-            best_value = min(best_value, minimax(board, depth - 1, True))
+            eval = minimax(board, depth - 1, alpha, beta, True)
             board.pop()
-        return best_value
+            min_eval = min(min_eval, eval)
+            beta = min(beta, eval)
+            if beta <= alpha:
+                break
+        return min_eval
 
 
-def get_best_move(board, depth=2):
-    """Select the best move using Minimax."""
+def best_move(board, depth=2):
+    """Find the best move using Minimax."""
+    best_eval = float('-inf') if board.turn else float('inf')
     best_move = None
-    best_value = -float('inf')
+
     for move in board.legal_moves:
         board.push(move)
-        move_value = minimax(board, depth - 1, False)
+        eval = minimax(board, depth - 1, float('-inf'), float('inf'), not board.turn)
         board.pop()
-        if move_value > best_value:
-            best_value = move_value
+
+        if (board.turn and eval > best_eval) or (not board.turn and eval < best_eval):
+            best_eval = eval
             best_move = move
+
     return best_move
 
 
-def play_random_game():
-    """Simulates a game where both players make random moves."""
+def random_move(board):
+    """Play a random legal move."""
+    return random.choice(list(board.legal_moves))
+
+
+def play_game(white_strategy, black_strategy):
+    """Simulate a chess game with different strategies."""
     board = chess.Board()
+
     while not board.is_game_over():
-        move = random.choice(list(board.legal_moves))
+        move = white_strategy(board) if board.turn == chess.WHITE else black_strategy(board)
         board.push(move)
-    return board.result(), get_termination(board)
+
+    result = board.result(claim_draw=True)
+    termination = get_termination(board)
+    
+    return result, termination
 
 
-def play_minimax_game(minimax_first=True):
-    """Simulates a game where one player uses minimax and the other plays randomly."""
-    board = chess.Board()
-    while not board.is_game_over():
-        if (board.turn == chess.WHITE and minimax_first) or (board.turn == chess.BLACK and not minimax_first):
-            move = get_best_move(board, depth=2)
+def run_simulation(num_games, white_strategy, black_strategy):
+    """Run multiple games and summarize the results."""
+    stats = collections.Counter()
+
+    for _ in range(num_games):
+        result, termination = play_game(white_strategy, black_strategy)
+        if termination == 'is_checkmate':
+            stats[result] += 1
         else:
-            move = random.choice(list(board.legal_moves))
-        board.push(move)
-    return board.result(), get_termination(board)
+            stats[termination] += 1
+
+    return stats
 
 
-def simulate_games(n=1000):
-    """Runs simulations for both random and minimax-based games."""
-    random_stats = collections.Counter()
-    minimax_first_stats = collections.Counter()
-    minimax_second_stats = collections.Counter()
+def calculate_win_rate(stats):
+    """Compute win rates from simulation results."""
+    white_wins = stats['1-0']
+    black_wins = stats['0-1']
+    draws = sum(stats[term] for term in stats if term not in ['1-0', '0-1'])
 
-    for _ in range(n):
-        result, termination = play_random_game()
-        random_stats[result] += 1
+    total_games = white_wins + black_wins + draws
+    white_win_rate = (white_wins / total_games) * 100
+    black_win_rate = (black_wins / total_games) * 100
+    draw_rate = (draws / total_games) * 100
 
-        result, termination = play_minimax_game(minimax_first=True)
-        minimax_first_stats[result] += 1
+    return white_win_rate, black_win_rate, draw_rate
 
-        result, termination = play_minimax_game(minimax_first=False)
-        minimax_second_stats[result] += 1
 
-    return random_stats, minimax_first_stats, minimax_second_stats
-
+# Number of simulations per case
+NUM_GAMES = 1000
 
 # Run simulations
-random_results, minimax_first_results, minimax_second_results = simulate_games(1000)
+print("Running Case 1: Random VS Random")
+stats1 = run_simulation(NUM_GAMES, random_move, random_move)
+w1, b1, d1 = calculate_win_rate(stats1)
+
+print("Running Case 2: Expert (Minimax) VS Random")
+stats2 = run_simulation(NUM_GAMES, best_move, random_move)
+w2, b2, d2 = calculate_win_rate(stats2)
+
+print("Running Case 3: Random VS Expert (Minimax)")
+stats3 = run_simulation(NUM_GAMES, random_move, best_move)
+w3, b3, d3 = calculate_win_rate(stats3)
 
 # Display results
-print("Random vs Random:", random_results)
-print("Minimax First vs Random:", minimax_first_results)
-print("Minimax Second vs Random:", minimax_second_results)
-
-
-def calculate_win_rates(stats):
-    """Calculate win percentages from simulation results."""
-    total_games = sum(stats.values())
-    white_wins = stats.get("1-0", 0) / total_games * 100
-    black_wins = stats.get("0-1", 0) / total_games * 100
-    draws = stats.get("1/2-1/2", 0) / total_games * 100
-    return {
-        "White Win %": white_wins,
-        "Black Win %": black_wins,
-        "Draw %": draws,
-    }
-
-
-print("Random Strategy Win Rates:", calculate_win_rates(random_results))
-print("Minimax First Strategy Win Rates:", calculate_win_rates(minimax_first_results))
-print("Minimax Second Strategy Win Rates:", calculate_win_rates(minimax_second_results))
+print("\n=== Simulation Results (Win Rates) ===")
+print(f"Case 1 (Random vs. Random): White Win: {w1:.2f}%, Black Win: {b1:.2f}%, Draw: {d1:.2f}%")
+print(f"Case 2 (Minimax vs. Random): White Win: {w2:.2f}%, Black Win: {b2:.2f}%, Draw: {d2:.2f}%")
+print(f"Case 3 (Random vs. Minimax): White Win: {w3:.2f}%, Black Win: {b3:.2f}%, Draw: {d3:.2f}%")
