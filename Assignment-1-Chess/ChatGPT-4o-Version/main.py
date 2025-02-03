@@ -1,127 +1,87 @@
 import chess
+import chess.engine
 import random
-import numpy as np
-import pandas as pd
+import concurrent.futures
 
-# --- Opening Book ---
-opening_book = {
-    "e2e4": ["e7e5", "c7c5", "e7e6", "c7c6"],  # Responses to 1. e4
-    "d2d4": ["d7d5", "g8f6", "e7e6"],  # Responses to 1. d4
-    "c2c4": ["e7e5", "c7c5", "g8f6"],  # Responses to 1. c4 (English)
-    "g1f3": ["d7d5", "g8f6", "c7c5"],  # Responses to 1. Nf3
-}
+NUM_GAMES = 1000  # Number of games to simulate
+MINIMAX_DEPTH = 2  # Depth for the minimax algorithm
 
-def get_opening_move(board):
-    """Returns an opening move if available, otherwise None."""
-    moves = [move.uci() for move in board.move_stack]  # Convert to UCI format
-    if len(moves) == 0:
-        return random.choice(["e2e4", "d2d4", "c2c4", "g1f3"])  # First move
-    elif len(moves) == 1:
-        return random.choice(opening_book.get(moves[0], []))  # Respond if in book
-    return None  # No book move
-
-# --- Minimax with Alpha-Beta Pruning ---
-piece_values = {
-    chess.PAWN: 100, chess.KNIGHT: 320, chess.BISHOP: 330,
-    chess.ROOK: 500, chess.QUEEN: 900, chess.KING: 20000
-}
-
-def evaluate_board(board):
-    """Evaluate board state, considering material, position, and endgame dynamics."""
-    if board.is_checkmate():
-        return 100000 if board.turn == chess.BLACK else -100000
-    if board.is_stalemate() or board.is_insufficient_material():
-        return 0  # Draw
-
-    score = sum(
-        piece_values.get(board.piece_at(square).piece_type, 0)
-        * (1 if board.piece_at(square).color == chess.WHITE else -1)
-        for square in chess.SQUARES if board.piece_at(square)
-    )
-    
-    return score + len(list(board.legal_moves)) * 5  # Mobility bonus
-
-def order_moves(board):
-    """Orders moves to prioritize captures and checks for better alpha-beta pruning."""
-    def move_priority(move):
-        if board.gives_check(move):
-            return 20
-        if board.is_capture(move):
-            return 10
-        return 1
-    return sorted(board.legal_moves, key=move_priority, reverse=True)
-
-def minimax(board, depth, alpha, beta, is_maximizing):
-    """Minimax algorithm with alpha-beta pruning."""
-    if depth == 0 or board.is_game_over():
-        return evaluate_board(board)
-
-    best_score = -np.inf if is_maximizing else np.inf
-    for move in order_moves(board):
-        board.push(move)
-        score = minimax(board, depth - 1, alpha, beta, not is_maximizing)
-        board.pop()
-        if is_maximizing:
-            best_score = max(best_score, score)
-            alpha = max(alpha, best_score)
-        else:
-            best_score = min(best_score, score)
-            beta = min(beta, best_score)
-        if beta <= alpha:
-            break  # Alpha-beta pruning
-    return best_score
-
-def best_move_minimax(board, depth=4):
-    """Select the best move using Minimax, considering the opening book."""
-    if board.fullmove_number <= 2:  # Use opening book for first 2 moves
-        move = get_opening_move(board)
-        if move:
-            return chess.Move.from_uci(move)
-
-    best_score, best_move = -np.inf, None
-    alpha, beta = -np.inf, np.inf
-    for move in order_moves(board):
-        board.push(move)
-        score = minimax(board, depth - 1, alpha, beta, False)
-        board.pop()
-        if score > best_score:
-            best_score, best_move = score, move
-    return best_move
-
-# --- Random Move Selection ---
 def random_move(board):
+    """Returns a random legal move."""
     return random.choice(list(board.legal_moves))
 
-# --- Simulate a Game ---
+def minimax(board, depth, is_maximizing):
+    """Simple Minimax algorithm with basic material evaluation."""
+    if depth == 0 or board.is_game_over():
+        return evaluate_board(board), None
+
+    best_move = None
+    if is_maximizing:
+        max_eval = float('-inf')
+        for move in board.legal_moves:
+            board.push(move)
+            eval, _ = minimax(board, depth - 1, False)
+            board.pop()
+            if eval > max_eval:
+                max_eval = eval
+                best_move = move
+        return max_eval, best_move
+    else:
+        min_eval = float('inf')
+        for move in board.legal_moves:
+            board.push(move)
+            eval, _ = minimax(board, depth - 1, True)
+            board.pop()
+            if eval < min_eval:
+                min_eval = eval
+                best_move = move
+        return min_eval, best_move
+
+def evaluate_board(board):
+    """Basic evaluation function based on material count."""
+    piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+                    chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 100}
+    score = 0
+    for piece, value in piece_values.items():
+        score += len(board.pieces(piece, chess.WHITE)) * value
+        score -= len(board.pieces(piece, chess.BLACK)) * value
+    return score
+
 def play_game(player_white, player_black):
-    """Simulates a game between two players."""
+    """Simulates a single chess game."""
     board = chess.Board()
     while not board.is_game_over():
-        move = player_white(board) if board.turn == chess.WHITE else player_black(board)
+        if board.turn == chess.WHITE:
+            move = player_white(board)
+        else:
+            move = player_black(board)
         board.push(move)
     result = board.result()
-    return 1 if result == "1-0" else -1 if result == "0-1" else 0
+    return result
 
-# --- Simulate 1,000 Games ---
-num_games = 1000
-scenarios = {
-    "Random vs. Random": (random_move, random_move),
-    "Minimax (White) vs. Random (Black)": (lambda b: best_move_minimax(b, 4), random_move),
-    "Random (White) vs. Minimax (Black)": (random_move, lambda b: best_move_minimax(b, 4))
-}
+def simulate_games(player_white, player_black, num_games):
+    """Simulates multiple games and returns the win rate."""
+    results = {"1-0": 0, "0-1": 0, "1/2-1/2": 0}
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = [executor.submit(play_game, player_white, player_black) for _ in range(num_games)]
+        for future in concurrent.futures.as_completed(futures):
+            results[future.result()] += 1
 
-# --- Run Simulations ---
-results = {scenario: [play_game(white, black) for _ in range(num_games)] for scenario, (white, black) in scenarios.items()}
+    win_rate_white = results["1-0"] / num_games * 100
+    win_rate_black = results["0-1"] / num_games * 100
+    draw_rate = results["1/2-1/2"] / num_games * 100
 
-# --- Summarize Results ---
-win_rates = {
-    scenario: {
-        "White Win Rate": sum(1 for r in results[scenario] if r == 1) / num_games * 100,
-        "Black Win Rate": sum(1 for r in results[scenario] if r == -1) / num_games * 100,
-        "Draw Rate": sum(1 for r in results[scenario] if r == 0) / num_games * 100
-    } for scenario in scenarios
-}
+    return win_rate_white, win_rate_black, draw_rate
 
-# --- Display Results ---
-df_results = pd.DataFrame(win_rates).T
-print(df_results)
+# Run simulations for different cases
+print("Simulating Random vs Random...")
+win_white, win_black, draw = simulate_games(random_move, random_move, NUM_GAMES)
+print(f"Random vs Random - White Win Rate: {win_white:.2f}%, Black Win Rate: {win_black:.2f}%, Draw Rate: {draw:.2f}%\n")
+
+print("Simulating Expert (White) vs Random...")
+win_white, win_black, draw = simulate_games(lambda b: minimax(b, MINIMAX_DEPTH, True)[1], random_move, NUM_GAMES)
+print(f"Expert (White) vs Random - White Win Rate: {win_white:.2f}%, Black Win Rate: {win_black:.2f}%, Draw Rate: {draw:.2f}%\n")
+
+print("Simulating Random vs Expert (Black)...")
+win_white, win_black, draw = simulate_games(random_move, lambda b: minimax(b, MINIMAX_DEPTH, False)[1], NUM_GAMES)
+print(f"Random vs Expert (Black) - White Win Rate: {win_white:.2f}%, Black Win Rate: {win_black:.2f}%, Draw Rate: {draw:.2f}%")
